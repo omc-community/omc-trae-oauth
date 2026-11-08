@@ -126,7 +126,7 @@ func execute(req pluginapi.ExecutorRequest, sender httpSender) (pluginapi.Execut
 			return pluginapi.ExecutorResponse{}, pluginabi.NewError("transport_error", plan.Spec.Realm+" upstream transport failed", 503)
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			f := classifyUpstream(plan.Spec, resp.StatusCode, resp.Body)
+			f := classifyUpstream(plan.Spec, resp.StatusCode, resp.Headers, resp.Body)
 			last = decisionError(f)
 			if f.WrongFunction {
 				continue
@@ -135,7 +135,7 @@ func execute(req pluginapi.ExecutorRequest, sender httpSender) (pluginapi.Execut
 		}
 		if !bytes.Contains(resp.Body, []byte("data:")) {
 			// A 200 that is not an SSE stream is Trae refusing in JSON.
-			f := classifyUpstream(plan.Spec, http.StatusBadGateway, resp.Body)
+			f := classifyUpstream(plan.Spec, http.StatusBadGateway, resp.Headers, resp.Body)
 			last = decisionError(f)
 			if f.WrongFunction {
 				continue
@@ -345,7 +345,7 @@ func executeStream(req pluginapi.ExecutorRequest, callbackID, streamID string, s
 				release()
 				return nil, pluginabi.NewError("transport_error", plan.Spec.Realm+" upstream stream failed", 503)
 			}
-			f := classifyUpstream(plan.Spec, response.StatusCode, raw)
+			f := classifyUpstream(plan.Spec, response.StatusCode, response.Headers, raw)
 			last = decisionError(f)
 			if f.WrongFunction {
 				continue

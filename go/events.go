@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
 )
@@ -19,6 +21,7 @@ type traeFailure struct {
 	Lapsed        bool
 	Quota         bool
 	WrongFunction bool
+	RetryAfter    int
 }
 
 func decisionError(f *traeFailure) error {
@@ -30,6 +33,7 @@ func decisionError(f *traeFailure) error {
 		status = 502
 	}
 	err := pluginabi.NewError(failureCode(f), f.Message, status)
+	err.RetryAfterSeconds = f.RetryAfter
 	return err
 }
 
@@ -44,6 +48,38 @@ func failureCode(f *traeFailure) string {
 	default:
 		return "upstream_error"
 	}
+}
+
+// retryAfterHint is how long Trae says a quota still has to run, in whole
+// seconds, or 0 when it says nothing. A quota refusal that carries Retry-After is
+// the only deadline it states; CPA reads the number as the cooldown it applies,
+// so without it the credential is retried while the allowance is still spent.
+func retryAfterHint(headers http.Header) int {
+	value := ""
+	if headers != nil {
+		value = strings.TrimSpace(headers.Get("Retry-After"))
+	}
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds > 0 {
+			return seconds
+		}
+		return 0
+	}
+	at, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	wait := time.Until(at)
+	if wait <= 0 {
+		return 0
+	}
+	if seconds := int(wait / time.Second); seconds > 0 {
+		return seconds
+	}
+	return 1
 }
 
 // lapsed reports a business code that means the sign-in is over.
@@ -92,7 +128,7 @@ var quotaWords = []string{"quota", "credit", "insufficient", "exceed", "limit", 
 
 // classifyUpstream maps an HTTP failure or an error frame to a normalized
 // failure with the status the client should see.
-func classifyUpstream(spec siteSpec, status int, body []byte) *traeFailure {
+func classifyUpstream(spec siteSpec, status int, headers http.Header, body []byte) *traeFailure {
 	if status < 400 || status > 599 {
 		status = 502
 	}
@@ -104,7 +140,7 @@ func classifyUpstream(spec siteSpec, status int, body []byte) *traeFailure {
 		return &traeFailure{Status: 401, Code: code, Message: spec.Realm + "'s sign-in has expired (" + message + "); sign in again", Lapsed: true}
 	}
 	if status == 429 || quotaCode(spec, code) || (status == 403 && matchesAny(message, quotaWords...)) {
-		return &traeFailure{Status: 429, Code: code, Message: spec.Realm + ": " + message, Quota: true}
+		return &traeFailure{Status: 429, Code: code, Message: spec.Realm + ": " + message, Quota: true, RetryAfter: retryAfterHint(headers)}
 	}
 	if status == 400 && wrongFunction(code) {
 		return &traeFailure{Status: 502, Code: code, Message: spec.Realm + ": " + message, WrongFunction: true}
@@ -435,7 +471,7 @@ func (t *traeEvents) frame(frame sseFrame) []traeEvent {
 		name = eventName(firstNonEmpty(rawString(parsed["event"]), rawString(parsed["type"])))
 	}
 	if name == "error" || (name != "output" && parsed["code"] != nil && parsed["message"] != nil && parsed["response"] == nil && parsed["content"] == nil) {
-		return []traeEvent{{Err: classifyUpstream(t.site, 502, []byte(data))}}
+		return []traeEvent{{Err: classifyUpstream(t.site, 502, nil, []byte(data))}}
 	}
 	if name == "token_usage" {
 		if usageRaw, ok := parsed["usage"].(map[string]any); ok {

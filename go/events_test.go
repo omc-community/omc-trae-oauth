@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func collect(events *traeEvents, chunks ...string) []traeEvent {
@@ -219,9 +220,42 @@ func TestClassifyUpstream(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := classifyUpstream(spec, tc.status, []byte(tc.body))
+			f := classifyUpstream(spec, tc.status, nil, []byte(tc.body))
 			if f.Status != tc.want || f.Lapsed != tc.lapsed || f.Quota != tc.quota || f.WrongFunction != tc.wrong {
 				t.Fatalf("failure = %#v", f)
+			}
+		})
+	}
+}
+
+// TestQuotaRefusalCarriesTheRetryWindow pins what a quota refusal hands CPA: the
+// Retry-After Trae sends is the only statement of when the allowance returns, and
+// without it the credential is retried while the quota is still spent.
+func TestQuotaRefusalCarriesTheRetryWindow(t *testing.T) {
+	spec := mustSite(t, siteTraeCN)
+	at := time.Now().Add(90 * time.Second).UTC().Format(http.TimeFormat)
+	for _, tc := range []struct {
+		name    string
+		headers http.Header
+		want    int
+	}{
+		{"seconds", http.Header{"Retry-After": {"120"}}, 120},
+		{"http date", http.Header{"Retry-After": {at}}, 90},
+		{"no statement", nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := classifyUpstream(spec, 429, tc.headers, []byte(`{}`))
+			if !f.Quota || f.Status != 429 {
+				t.Fatalf("failure = %#v", f)
+			}
+			if tc.want == 0 {
+				if f.RetryAfter != 0 {
+					t.Fatalf("RetryAfter = %d, want none", f.RetryAfter)
+				}
+				return
+			}
+			if f.RetryAfter < tc.want-2 || f.RetryAfter > tc.want {
+				t.Fatalf("RetryAfter = %d, want about %d", f.RetryAfter, tc.want)
 			}
 		})
 	}

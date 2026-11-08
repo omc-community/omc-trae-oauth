@@ -109,7 +109,9 @@ international deployment keeps the 19 digits it was signed in with.
 - Import of existing `"type": "trae"` auth files.
 - Error mapping that keeps a lapsed sign-in and a usage limit on their own
   status codes, retries a model through another chat function when Trae rejects
-  the function, and folds everything else into a readable upstream failure.
+  the function, and folds everything else into a readable upstream failure. A usage
+  limit also states how long it still runs when Trae sends `Retry-After`, so CPA
+  rests the credential instead of retrying inside the window.
 
 ## Installation
 
