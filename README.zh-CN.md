@@ -168,8 +168,8 @@ omc-trae-oauth.omc.json
 
 ```text
 assets/logo.png         插件贴纸：插件在商店中的形象
-assets/trae-color.svg   Trae 入口的绿色标志
-assets/trae.svg         Trae CN 入口的单色标志
+assets/trae.svg         Trae 入口的单色标志
+assets/trae-color.svg   Trae CN 入口的绿色标志
 go/                     Go/cgo 插件实现与测试
 go/assets/              内嵌图标与 omc.json 声明
 docs/USAGE.md           运维安装与使用指南

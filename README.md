@@ -191,8 +191,8 @@ and ecosystem development standards.
 
 ```text
 assets/logo.png         Plugin sticker: the plugin's face in a store
-assets/trae-color.svg   Trae's green mark for the Trae entry
-assets/trae.svg         Monochrome mark for the Trae CN entry
+assets/trae.svg         Trae's monochrome mark for the Trae entry
+assets/trae-color.svg   Trae CN's green mark for the Trae CN entry
 go/                     Go/cgo plugin implementation and tests
 go/assets/              Embedded artwork and the omc.json declaration
 docs/USAGE.md           Operator installation and usage guide

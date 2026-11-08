@@ -20,11 +20,11 @@ const publicAssetBaseURL = "https://raw.githubusercontent.com/omc-community/omc-
 // in for a sign-in card; the two cards below keep the provider's own artwork.
 const pluginLogo = "logo.png"
 
-// traeColorLogo is Trae's green mark, for the international portal.
-const traeColorLogo = "trae-color.svg"
-
-// traeMonoLogo is Trae CN's monochrome mark.
+// traeMonoLogo is Trae's monochrome mark, for the international portal.
 const traeMonoLogo = "trae.svg"
+
+// traeColorLogo is Trae CN's green mark.
+const traeColorLogo = "trae-color.svg"
 
 //go:embed assets/logo.png
 var pluginLogoPNG []byte

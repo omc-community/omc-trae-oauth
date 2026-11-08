@@ -31,9 +31,9 @@ affiliated with or endorsed by Trae.
 - `assets/logo.png` is this plugin's own face in a store: the Trae mark drawn on the
   OMC sticker the ecosystem's plugins share. It identifies the plugin rather than the
   service, and no sign-in card uses it.
-- `assets/trae-color.svg` is Trae's green mark. It is the logo of the `trae` login
-  entry, and it is the image the official plugin source publishes for the store.
-- `assets/trae.svg` is the same mark in a single color. It is the logo of the
+- `assets/trae.svg` is Trae's monochrome mark. It is the logo of the `trae` login
+  entry.
+- `assets/trae-color.svg` is the same mark in Trae's green. It is the logo of the
   `trae-cn` login entry, so the two sign-in cards are distinguishable at a glance.
 
 `go/assets/` holds the copies the plugin embeds and serves, and they must stay

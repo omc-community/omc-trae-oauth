@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # The two sign-in entries the panel publishes: Trae (trae.ai) and Trae CN.
 OAUTH_ENTRIES = (
-    ("trae", "Trae", "trae-color.svg"),
-    ("trae-cn", "Trae CN", "trae.svg"),
+    ("trae", "Trae", "trae.svg"),
+    ("trae-cn", "Trae CN", "trae-color.svg"),
 )
 CREDENTIAL_PROVIDER = "trae"
 # Served artwork is compared against the embedded sources, so a stale or
@@ -119,7 +119,7 @@ def smoke(library, version, descriptor):
                 raise ValueError(f"native {method} must stay on the trae provider key")
         management = rpc("management.register", {})
         resources = management["resources"]
-        if [entry["path"] for entry in resources] != ["/logo.png", "/trae-color.svg", "/trae.svg", "/omc.json"] or any(entry["menu"] for entry in resources) or management.get("routes"):
+        if [entry["path"] for entry in resources] != ["/logo.png", "/trae.svg", "/trae-color.svg", "/omc.json"] or any(entry["menu"] for entry in resources) or management.get("routes"):
             raise ValueError("native public resources must be exactly four passive assets with no menu")
         prefix = f"/v0/resource/plugins/{PLUGIN_ID}"
         assets = {name: ((ROOT / "go" / "assets" / name).read_bytes(), content_type) for name, content_type in ASSETS}

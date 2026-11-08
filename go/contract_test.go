@@ -40,7 +40,7 @@ func TestRegistrationPublishesBothPortals(t *testing.T) {
 	if len(entries) != 2 || entries[0].Identifier != siteTrae || entries[1].Identifier != siteTraeCN {
 		t.Fatalf("entries = %#v", entries)
 	}
-	if entries[0].Logo != publicAssetBaseURL+traeColorLogo || entries[1].Logo != publicAssetBaseURL+traeMonoLogo {
+	if entries[0].Logo != publicAssetBaseURL+traeMonoLogo || entries[1].Logo != publicAssetBaseURL+traeColorLogo {
 		t.Fatalf("entry logos = %#v", entries)
 	}
 }

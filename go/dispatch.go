@@ -57,8 +57,8 @@ func unmarshal(raw []byte, out any) error {
 // to its card and a re-login can find its portal.
 func authEntries() []pluginapi.AuthProviderEntry {
 	return []pluginapi.AuthProviderEntry{
-		{Identifier: siteTrae, Name: "Trae", Logo: resourceAssetURL(traeColorLogo)},
-		{Identifier: siteTraeCN, Name: "Trae CN", Logo: resourceAssetURL(traeMonoLogo)},
+		{Identifier: siteTrae, Name: "Trae", Logo: resourceAssetURL(traeMonoLogo)},
+		{Identifier: siteTraeCN, Name: "Trae CN", Logo: resourceAssetURL(traeColorLogo)},
 	}
 }
 
@@ -168,8 +168,8 @@ func handleMethod(method string, raw []byte) (any, error) {
 	case "management.register":
 		return map[string]any{"resources": []map[string]any{
 			{"path": "/" + pluginLogo, "menu": "", "description": "Plugin sticker mark: the plugin's face in a store."},
-			{"path": "/" + traeColorLogo, "menu": "", "description": "Trae's green sign-in logo."},
-			{"path": "/" + traeMonoLogo, "menu": "", "description": "Monochrome Trae mark for the Trae CN sign-in entry."},
+			{"path": "/" + traeMonoLogo, "menu": "", "description": "Monochrome Trae mark for the Trae sign-in entry."},
+			{"path": "/" + traeColorLogo, "menu": "", "description": "Trae CN's green sign-in logo."},
 			{"path": "/omc.json", "menu": "", "description": "Public, optional OMC plugin declaration."},
 		}}, nil
 	case "management.handle":
