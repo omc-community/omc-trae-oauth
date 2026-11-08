@@ -658,8 +658,13 @@ func writeAtomic(path string, raw []byte) error {
 		return errors.New("cannot write sign-in state")
 	}
 	if err := os.Rename(name, path); err != nil {
-		_ = os.Remove(name)
-		return errors.New("cannot write sign-in state")
+		// Windows refuses to rename over an existing file; a second callback
+		// for the same flow replaces the first.
+		_ = os.Remove(path)
+		if err = os.Rename(name, path); err != nil {
+			_ = os.Remove(name)
+			return errors.New("cannot write sign-in state")
+		}
 	}
 	return nil
 }
