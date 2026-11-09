@@ -34,6 +34,9 @@ func decisionError(f *traeFailure) error {
 	}
 	err := pluginabi.NewError(failureCode(f), f.Message, status)
 	err.RetryAfterSeconds = f.RetryAfter
+	// Trae's quota is the account's entitlement packs, so a quota refusal applies
+	// to every model of the credential, not only the requested one.
+	err.CredentialScoped = f.Quota
 	return err
 }
 

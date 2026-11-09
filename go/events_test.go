@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
 )
 
 func collect(events *traeEvents, chunks ...string) []traeEvent {
@@ -256,6 +259,33 @@ func TestQuotaRefusalCarriesTheRetryWindow(t *testing.T) {
 			}
 			if f.RetryAfter < tc.want-2 || f.RetryAfter > tc.want {
 				t.Fatalf("RetryAfter = %d, want about %d", f.RetryAfter, tc.want)
+			}
+		})
+	}
+}
+
+// TestQuotaRefusalIsCredentialScoped pins the scope Trae's refusal carries: the
+// account's entitlement packs cover every model, so a spent quota cools the
+// whole credential; a lapsed sign-in or a refused function stays model-scoped.
+func TestQuotaRefusalIsCredentialScoped(t *testing.T) {
+	spec := mustSite(t, siteTraeCN)
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   bool
+	}{
+		{"quota 429", 429, `{}`, true},
+		{"quota code", 200, `{"code":1005,"message":"quota exceeded"}`, true},
+		{"lapsed sign-in", 401, `{}`, false},
+		{"wrong function", 400, `{"code":4001,"message":"bad function"}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := classifyUpstream(spec, tc.status, nil, []byte(tc.body))
+			var perr *pluginabi.Error
+			if err := decisionError(f); !errors.As(err, &perr) || perr.CredentialScoped != tc.want {
+				t.Fatalf("decisionError = %#v", err)
 			}
 		})
 	}

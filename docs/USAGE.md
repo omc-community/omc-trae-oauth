@@ -11,6 +11,9 @@
   per-entry name and logo first shipped in v8.0.51. On an older host both entries
   still work; a panel that predates the field shows one card per *identifier*
   decorated with the plugin's own name and logo.
+- **CPA v8.0.62 or later** for credential-wide cooldowns: an account-level `429`
+  cools every model of the credential. An older host ignores the scope and cools
+  only the reporting model.
 - A browser on the CPA host, or loopback reachable through a forwarded port. Trae's
   authorization page only sends its callback to `127.0.0.1`.
 - Go 1.27.1 for local development. Release builds are produced by CI.
@@ -306,6 +309,10 @@ sees the mapped status:
 | Other HTTP `400` | `400` with Trae's code and message |
 | HTTP `403` that is neither a lapsed sign-in nor a quota refusal | `403` |
 | Other upstream statuses, or a transport failure | `502` / `503` |
+
+A quota `429` is reported as credential-wide: Trae's entitlement packs cover the
+account, so every model of the credential waits for the stated window. A lapsed
+sign-in and a refused function stay model-scoped.
 
 Other behaviour worth knowing:
 
