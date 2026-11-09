@@ -14,8 +14,9 @@
 </p>
 
 <p align="center">
-  为 <a href="https://github.com/router-for-me/CLIProxyAPI">CLIProxyAPI</a>
-  提供原生 Trae 与 Trae CN OAuth 登录
+  专为 Oh-My-CPA 适配，兼容
+  <a href="https://github.com/router-for-me/CLIProxyAPI">CLIProxyAPI</a>
+  的原生 Trae 与 Trae CN OAuth 登录
 </p>
 
 <p align="center">
