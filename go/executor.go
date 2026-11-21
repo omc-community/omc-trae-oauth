@@ -220,7 +220,7 @@ func closeStreamWithError(id, message string, err error) {
 	var detail *pluginabi.Error
 	_ = errors.As(err, &detail)
 	if detail == nil {
-		closeStream(id, message)
+		closeStreamHook(id, message)
 		return
 	}
 	_ = hostRPC("host.stream.close", map[string]any{"stream_id": id, "error": message, "error_detail": detail}, nil)
@@ -250,6 +250,7 @@ func readWholeStream(id string) ([]byte, error) {
 var (
 	readStreamChunk = readHostStream
 	emitStreamFrame = emitStreamChunk
+	closeStreamHook = closeStream
 	openHTTPStream  = openUpstreamStream
 )
 
@@ -280,7 +281,7 @@ func (p *streamPump) deliver(events []traeEvent) bool {
 		}
 		for _, frame := range p.writer.frames(e) {
 			if emitStreamFrame(p.target, frame) != nil {
-				closeStream(p.target, "client stream closed")
+				closeStreamHook(p.target, "client stream closed")
 				return false
 			}
 			p.emitted = true
@@ -289,28 +290,39 @@ func (p *streamPump) deliver(events []traeEvent) bool {
 	return true
 }
 
+func (p *streamPump) finish() {
+	if !p.deliver(p.events.flush()) {
+		return
+	}
+	if !p.writer.saidSomething() {
+		closeStreamHook(p.target, "Trae ended without an answer")
+		return
+	}
+	if frame := p.writer.done(); len(frame) > 0 {
+		_ = emitStreamFrame(p.target, frame)
+	}
+	closeStreamHook(p.target, "")
+}
+
 func (p *streamPump) run() {
 	for {
 		r, err := readStreamChunk(p.source)
 		if err != nil {
-			closeStream(p.target, "Trae stream failed")
+			if len(r.Payload) > 0 && !p.deliver(p.events.feed(r.Payload)) {
+				return
+			}
+			if p.events.done {
+				p.finish()
+			} else {
+				closeStreamHook(p.target, "Trae stream failed")
+			}
 			return
 		}
 		if !p.deliver(p.events.feed(r.Payload)) {
 			return
 		}
 		if r.Done {
-			if !p.deliver(p.events.flush()) {
-				return
-			}
-			if !p.writer.saidSomething() {
-				closeStream(p.target, "Trae ended without an answer")
-				return
-			}
-			if frame := p.writer.done(); len(frame) > 0 {
-				_ = emitStreamFrame(p.target, frame)
-			}
-			closeStream(p.target, "")
+			p.finish()
 			return
 		}
 	}
@@ -360,9 +372,18 @@ func executeStream(req pluginapi.ExecutorRequest, callbackID, streamID string, s
 		// instead of arriving as a 200 stream that ends in an error.
 		var pending []traeEvent
 		retry := false
+		sourceDone := false
 		for attempt := 0; attempt < 16 && len(pending) == 0; attempt++ {
 			r, err := readStreamChunk(response.StreamID)
 			if err != nil {
+				if len(r.Payload) > 0 {
+					pending = append(pending, events.feed(r.Payload)...)
+				}
+				if events.done {
+					pending = append(pending, events.flush()...)
+					sourceDone = true
+					break
+				}
 				closeHostStream(response.StreamID)
 				release()
 				return nil, pluginabi.NewError("transport_error", plan.Spec.Realm+" upstream stream failed", 503)
@@ -370,6 +391,7 @@ func executeStream(req pluginapi.ExecutorRequest, callbackID, streamID string, s
 			pending = append(pending, events.feed(r.Payload)...)
 			if r.Done {
 				pending = append(pending, events.flush()...)
+				sourceDone = true
 				break
 			}
 		}
@@ -395,6 +417,10 @@ func executeStream(req pluginapi.ExecutorRequest, callbackID, streamID string, s
 			defer release()
 			defer closeHostStream(pump.source)
 			if !pump.deliver(pending) {
+				return
+			}
+			if sourceDone {
+				pump.finish()
 				return
 			}
 			pump.run()

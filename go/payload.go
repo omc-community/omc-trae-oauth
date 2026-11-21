@@ -573,6 +573,7 @@ func mustNonce() []byte {
 func ideHeaders(c credential, spec siteSpec, extra map[string]string) http.Header {
 	h := http.Header{
 		"Content-Type":       {"application/json"},
+		"User-Agent":         {"Trae/" + spec.IDEVersion},
 		"Authorization":      {"Cloud-IDE-JWT " + c.Access},
 		"X-Cloudide-Token":   {c.Access},
 		"x-ide-token":        {c.Access},

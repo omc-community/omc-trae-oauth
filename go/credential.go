@@ -113,7 +113,7 @@ var sites = []siteSpec{
 		Brand:          "ASUS TUF Gaming A15 FA507RM_FA507RM",
 		DeviceExchange: true,
 		Lapsed:         []string{"1001", "401"},
-		Quota:          []string{"4008", "1005"},
+		Quota:          []string{"4008", "1005", "4011"},
 		Fallback:       traeCNFallbackCatalogue,
 		UsageKind:      "credits",
 	},

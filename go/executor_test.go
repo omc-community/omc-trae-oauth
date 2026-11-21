@@ -64,6 +64,9 @@ func TestExecuteAggregatesAnswer(t *testing.T) {
 			if req.Headers.Get("Authorization") != "Cloud-IDE-JWT token-1" {
 				t.Fatalf("authorization = %q", req.Headers.Get("Authorization"))
 			}
+			if req.Headers.Get("User-Agent") != "Trae/3.3.65" {
+				t.Fatalf("user-agent = %q", req.Headers.Get("User-Agent"))
+			}
 		}
 	}
 	if sent["config_name"] != "glm-5.2" || sent["model_name"] != "glm-5.2__dev" {
@@ -120,8 +123,10 @@ func TestExecuteStreamPumpsOpenAIFrames(t *testing.T) {
 	c := testCredential(siteTraeCN)
 	c.UID = "exec-stream"
 	sender := executorSender(t, "")
-	oldOpen, oldRead, oldEmit := openHTTPStream, readStreamChunk, emitStreamFrame
-	defer func() { openHTTPStream, readStreamChunk, emitStreamFrame = oldOpen, oldRead, oldEmit }()
+	oldOpen, oldRead, oldEmit, oldClose := openHTTPStream, readStreamChunk, emitStreamFrame, closeStreamHook
+	defer func() {
+		openHTTPStream, readStreamChunk, emitStreamFrame, closeStreamHook = oldOpen, oldRead, oldEmit, oldClose
+	}()
 	openHTTPStream = func(plan requestPlan, fn, callbackID string) (hostStreamResponse, error) {
 		return hostStreamResponse{StatusCode: 200, Headers: http.Header{"Content-Type": {"text/event-stream"}}, StreamID: "up"}, nil
 	}
@@ -142,27 +147,231 @@ func TestExecuteStreamPumpsOpenAIFrames(t *testing.T) {
 		frames <- payload
 		return nil
 	}
+	closed := make(chan string, 1)
+	closeStreamHook = func(_ string, message string) {
+		closed <- message
+	}
 	if _, err := executeStream(pluginapi.ExecutorRequest{
 		AuthID: "a", Model: "glm-5.2", StorageJSON: credentialJSON(c),
 		Payload: []byte(`{"model":"glm-5.2","stream":true,"messages":[{"role":"user","content":"hi"}]}`),
 	}, "cb", "down", sender); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(3 * time.Second)
+	select {
+	case msg := <-closed:
+		if msg != "" {
+			t.Fatalf("close message = %q, want clean close", msg)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for stream close")
+	}
+	close(frames)
 	var all []byte
-	for {
-		select {
-		case frame := <-frames:
-			all = append(all, frame...)
-			if strings.Contains(string(frame), "[DONE]") {
-				goto done
-			}
-		case <-deadline:
-			t.Fatalf("timed out; frames = %s", all)
+	for frame := range frames {
+		all = append(all, frame...)
+	}
+	if !strings.Contains(string(all), `"content":"Hi"`) || !strings.Contains(string(all), `"finish_reason":"stop"`) || !strings.Contains(string(all), "data: [DONE]") {
+		t.Fatalf("frames = %s", all)
+	}
+}
+
+func TestExecuteStreamCompletesOnReadErrorAfterDone(t *testing.T) {
+	c := testCredential(siteTraeCN)
+	c.UID = "exec-stream-after-done"
+	sender := executorSender(t, "")
+	oldOpen, oldRead, oldEmit, oldClose := openHTTPStream, readStreamChunk, emitStreamFrame, closeStreamHook
+	defer func() {
+		openHTTPStream, readStreamChunk, emitStreamFrame, closeStreamHook = oldOpen, oldRead, oldEmit, oldClose
+	}()
+	openHTTPStream = func(plan requestPlan, fn, callbackID string) (hostStreamResponse, error) {
+		return hostStreamResponse{StatusCode: 200, Headers: http.Header{"Content-Type": {"text/event-stream"}}, StreamID: "up"}, nil
+	}
+	step := 0
+	readStreamChunk = func(string) (hostReadResponse, error) {
+		step++
+		switch step {
+		case 1:
+			return hostReadResponse{Payload: []byte("event: output\ndata: {\"response\":\"Checking\"}\n\n")}, nil
+		case 2:
+			return hostReadResponse{Payload: []byte(
+				"event: output\ndata: {\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"ls\\\"}\"}}]}\n\n" +
+					"event: token_usage\ndata: {\"prompt_tokens\":653199,\"completion_tokens\":42,\"total_tokens\":653241}\n\n" +
+					"event: done\ndata: {\"finish_reason\":\"stop\"}\n\n",
+			)}, nil
+		default:
+			return hostReadResponse{}, errors.New("upstream stream failed")
 		}
 	}
-done:
-	if !strings.Contains(string(all), `"content":"Hi"`) || !strings.Contains(string(all), `"finish_reason":"stop"`) {
-		t.Fatalf("frames = %s", all)
+	frames := make(chan []byte, 32)
+	emitStreamFrame = func(_ string, payload []byte) error {
+		frames <- payload
+		return nil
+	}
+	closed := make(chan string, 1)
+	closeStreamHook = func(_ string, message string) {
+		closed <- message
+	}
+	if _, err := executeStream(pluginapi.ExecutorRequest{
+		AuthID: "a", Model: "glm-5.2", StorageJSON: credentialJSON(c),
+		Payload: []byte(`{"model":"glm-5.2","stream":true,"tools":[{"type":"function","function":{"name":"bash"}}],"messages":[{"role":"user","content":"hi"}]}`),
+	}, "cb", "down", sender); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case msg := <-closed:
+		if msg != "" {
+			t.Fatalf("close message = %q, want clean close", msg)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for stream close")
+	}
+	close(frames)
+	var all []byte
+	for frame := range frames {
+		all = append(all, frame...)
+	}
+	got := string(all)
+	if !strings.Contains(got, `"name":"bash"`) || !strings.Contains(got, `"finish_reason":"tool_calls"`) || !strings.Contains(got, `"prompt_tokens":653199`) || !strings.Contains(got, "data: [DONE]") {
+		t.Fatalf("frames = %s", got)
+	}
+}
+
+func TestExecuteStreamFailsOnReadErrorBeforeDone(t *testing.T) {
+	c := testCredential(siteTraeCN)
+	c.UID = "exec-stream-before-done"
+	sender := executorSender(t, "")
+	oldOpen, oldRead, oldEmit, oldClose := openHTTPStream, readStreamChunk, emitStreamFrame, closeStreamHook
+	defer func() {
+		openHTTPStream, readStreamChunk, emitStreamFrame, closeStreamHook = oldOpen, oldRead, oldEmit, oldClose
+	}()
+	openHTTPStream = func(plan requestPlan, fn, callbackID string) (hostStreamResponse, error) {
+		return hostStreamResponse{StatusCode: 200, Headers: http.Header{"Content-Type": {"text/event-stream"}}, StreamID: "up"}, nil
+	}
+	step := 0
+	readStreamChunk = func(string) (hostReadResponse, error) {
+		step++
+		if step == 1 {
+			return hostReadResponse{Payload: []byte("event: output\ndata: {\"response\":\"Partial\"}\n\n")}, nil
+		}
+		return hostReadResponse{}, errors.New("upstream stream failed")
+	}
+	frames := make(chan []byte, 32)
+	emitStreamFrame = func(_ string, payload []byte) error {
+		frames <- payload
+		return nil
+	}
+	closed := make(chan string, 1)
+	closeStreamHook = func(_ string, message string) {
+		closed <- message
+	}
+	if _, err := executeStream(pluginapi.ExecutorRequest{
+		AuthID: "a", Model: "glm-5.2", StorageJSON: credentialJSON(c),
+		Payload: []byte(`{"model":"glm-5.2","stream":true,"messages":[{"role":"user","content":"hi"}]}`),
+	}, "cb", "down", sender); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case msg := <-closed:
+		if msg != "Trae stream failed" {
+			t.Fatalf("close message = %q, want %q", msg, "Trae stream failed")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for stream close")
+	}
+	close(frames)
+	var all []byte
+	for frame := range frames {
+		all = append(all, frame...)
+	}
+	if strings.Contains(string(all), "data: [DONE]") {
+		t.Fatalf("unexpected [DONE] on failed stream: %s", all)
+	}
+}
+
+func TestExecuteStreamStartupCompletesOnSingleChunkOrPostDoneError(t *testing.T) {
+	cases := []struct {
+		name  string
+		reads func(step int) (hostReadResponse, error)
+		want  string
+	}{
+		{
+			name: "single chunk eof does not re-read closed stream",
+			reads: func(step int) (hostReadResponse, error) {
+				if step == 1 {
+					return hostReadResponse{
+						Payload: []byte("event: output\ndata: {\"response\":\"Done in one\"}\n\nevent: done\ndata: {\"finish_reason\":\"stop\"}\n\n"),
+						Done:    true,
+					}, nil
+				}
+				return hostReadResponse{}, errors.New("stream already closed")
+			},
+			want: `"content":"Done in one"`,
+		},
+		{
+			name: "tool-call-only startup read error after done",
+			reads: func(step int) (hostReadResponse, error) {
+				if step == 1 {
+					return hostReadResponse{
+						Payload: []byte(
+							"event: output\ndata: {\"tool_calls\":[{\"index\":0,\"id\":\"call_2\",\"function\":{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}}]}\n\n" +
+								"event: done\ndata: {\"finish_reason\":\"stop\"}\n\n",
+						),
+					}, nil
+				}
+				return hostReadResponse{}, errors.New("upstream stream failed")
+			},
+			want: `"name":"bash"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := testCredential(siteTraeCN)
+			c.UID = "exec-stream-startup-" + tc.name
+			sender := executorSender(t, "")
+			oldOpen, oldRead, oldEmit, oldClose := openHTTPStream, readStreamChunk, emitStreamFrame, closeStreamHook
+			defer func() {
+				openHTTPStream, readStreamChunk, emitStreamFrame, closeStreamHook = oldOpen, oldRead, oldEmit, oldClose
+			}()
+			openHTTPStream = func(plan requestPlan, fn, callbackID string) (hostStreamResponse, error) {
+				return hostStreamResponse{StatusCode: 200, Headers: http.Header{"Content-Type": {"text/event-stream"}}, StreamID: "up"}, nil
+			}
+			step := 0
+			readStreamChunk = func(string) (hostReadResponse, error) {
+				step++
+				return tc.reads(step)
+			}
+			frames := make(chan []byte, 32)
+			emitStreamFrame = func(_ string, payload []byte) error {
+				frames <- payload
+				return nil
+			}
+			closed := make(chan string, 1)
+			closeStreamHook = func(_ string, message string) {
+				closed <- message
+			}
+			if _, err := executeStream(pluginapi.ExecutorRequest{
+				AuthID: "a", Model: "glm-5.2", StorageJSON: credentialJSON(c),
+				Payload: []byte(`{"model":"glm-5.2","stream":true,"tools":[{"type":"function","function":{"name":"bash"}}],"messages":[{"role":"user","content":"hi"}]}`),
+			}, "cb", "down", sender); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case msg := <-closed:
+				if msg != "" {
+					t.Fatalf("close message = %q, want clean close", msg)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("timed out waiting for stream close")
+			}
+			close(frames)
+			var all []byte
+			for frame := range frames {
+				all = append(all, frame...)
+			}
+			got := string(all)
+			if !strings.Contains(got, tc.want) || !strings.Contains(got, "data: [DONE]") {
+				t.Fatalf("frames = %s", got)
+			}
+		})
 	}
 }

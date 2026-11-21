@@ -216,6 +216,7 @@ func TestClassifyUpstream(t *testing.T) {
 		{"lapsed code", 200, `{"code":1001,"message":"not logged in"}`, 401, true, false, false},
 		{"unauthorized", 401, `{}`, 401, true, false, false},
 		{"quota code", 200, `{"code":1005,"message":"quota exceeded"}`, 429, false, true, false},
+		{"cn rate limit 4011", 200, `{"code":4011,"message":"We're sorry, your requests have exceeded the rate limit."}`, 429, false, true, false},
 		{"rate limit", 429, `{}`, 429, false, true, false},
 		{"wrong function", 400, `{"code":4001,"message":"bad function"}`, 502, false, false, true},
 		{"bad request", 400, `{"code":123,"message":"bad"}`, 400, false, false, false},
@@ -277,6 +278,7 @@ func TestQuotaRefusalIsCredentialScoped(t *testing.T) {
 	}{
 		{"quota 429", 429, `{}`, true},
 		{"quota code", 200, `{"code":1005,"message":"quota exceeded"}`, true},
+		{"cn rate limit 4011", 200, `{"code":4011,"message":"We're sorry, your requests have exceeded the rate limit."}`, true},
 		{"lapsed sign-in", 401, `{}`, false},
 		{"wrong function", 400, `{"code":4001,"message":"bad function"}`, false},
 	}
@@ -302,5 +304,34 @@ func TestBuildMessagesHidesImagesFromTextOnlyModel(t *testing.T) {
 	parts := messages[0].Content.([]traePart)
 	if len(parts) != 1 || !strings.Contains(parts[0].Text, "can't see") {
 		t.Fatalf("parts = %#v", parts)
+	}
+}
+
+func TestIDEHeadersIncludeTraeUserAgent(t *testing.T) {
+	for _, tc := range []struct {
+		site string
+		want string
+	}{
+		{siteTrae, "Trae/3.5.51"},
+		{siteTraeCN, "Trae/3.3.65"},
+	} {
+		spec := mustSite(t, tc.site)
+		h := ideHeaders(testCredential(tc.site), spec, nil)
+		if got := h.Get("User-Agent"); got != tc.want {
+			t.Fatalf("%s User-Agent = %q, want %q", tc.site, got, tc.want)
+		}
+	}
+}
+
+func TestEventsClassifyCN4011ErrorFrameAsQuota(t *testing.T) {
+	events := newTraeEvents(mustSite(t, siteTraeCN), nil)
+	out := collect(events, "event: error\ndata: {\"code\":4011,\"message\":\"We're sorry, your requests have exceeded the rate limit.\"}\n\n")
+	_, _, _, _, _, failure := joined(out)
+	if failure == nil || !failure.Quota || failure.Status != 429 {
+		t.Fatalf("failure = %#v", failure)
+	}
+	var perr *pluginabi.Error
+	if err := decisionError(failure); !errors.As(err, &perr) || perr.Code != "quota_exhausted" || perr.HTTPStatus != 429 || !perr.CredentialScoped {
+		t.Fatalf("decisionError = %#v", err)
 	}
 }
